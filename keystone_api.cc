@@ -1,8 +1,9 @@
-#include "verify_utils.h"
 #include "app/eapp_utils.h"
 #include "app/syscall.h"
-#include "edge/edge_common.h"
 #include "crypto/aes.h"
+#include "edge/edge_common.h"
+#include "verifier/report.h"
+#include "verifier/test_dev_key.h"
 
 typedef unsigned char byte;
 
@@ -24,7 +25,7 @@ typedef struct KeystoneFunctions {
 } KeystoneFunctions;
 
 bool keystone_Init(const int cert_size, byte *cert) {
-  
+
 }
 
 bool keystone_Attest(const int what_to_say_size, byte* what_to_say, int* attestation_size_out, byte* attestation_out) {
@@ -38,16 +39,26 @@ bool keystone_Verify(const int what_to_say_size, byte* what_to_say, const int at
   Report report;
   report.fromBytes(attestation);
 
+  if(!report.checkSignaturesOnly(_sanctum_dev_public_key)) {
+    return false;
+  }
+
+  if (report.getDataSize() != what_to_say_size + 1) {
+    return false;
+  }
+  byte* report_says = (byte*) report.getDataSection();
+  for (int i = 0; i < attestation_size; i++) {
+    if (*(report_says++) != *(what_to_say++)) {
+      return false;
+    }
+  }
+
   // qq: sm and enclave measurement can both be in measurement_out?
   *measurement_out_size = MDSIZE * 2;
   memcpy(measurement_out, report.getSmHash(), MDSIZE);
   memcpy(measurement_out + MDSIZE, report.getEnclaveHash(), MDSIZE);
 
-  if(!report.checkSignaturesOnly(_sanctum_dev_public_key)) {
-    return false;
-  }
-
-  return verify_data(report, what_to_say_size, what_to_say);
+  return true;
 }
 
 #define AES_KEY_LEN 128
