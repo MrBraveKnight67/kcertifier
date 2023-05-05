@@ -1,4 +1,8 @@
 #include "verify_utils.h"
+#include "app/eapp_utils.h"
+#include "app/syscall.h"
+#include "edge/edge_common.h"
+#include "crypto/aes.h"
 
 typedef unsigned char byte;
 
@@ -19,67 +23,69 @@ typedef struct KeystoneFunctions {
   bool (*Unseal)(int in_size, byte* in, int* size_out, byte* out);
 } KeystoneFunctions;
 
-
 bool keystone_Init(const int cert_size, byte *cert) {
-  // qq: should this do anything??
+  
 }
 
 bool keystone_Attest(const int what_to_say_size, byte* what_to_say, int* attestation_size_out, byte* attestation_out) {
     assert(what_to_say_size <= 1024);
-    assert(attestation_size_out >= 1352);
+    *attestation_size_out = 1352;
     return attest_enclave((void *) attestation_out, what_to_say, what_to_say_size);
 }
 
-// qq: what is measurement_out?
 bool keystone_Verify(const int what_to_say_size, byte* what_to_say, const int attestation_size, byte* attestation, int* measurement_out_size, byte* measurement_out) {
   assert(attestation_size == sizeof(struct report_t));
-
-  /* Compute expected hashes */
-  
-  // qq: keystone expects this to be running host-side, trusted host, that can launch an enclave that will measure itself.
-  // option1: replicate the code into the verifier (since it's running inside an enclave)?
-  // option2: compute these beforehand and store with verifier
-  byte expected_enclave_hash[MDSIZE];
-  compute_expected_enclave_hash(expected_enclave_hash);
-
-  byte expected_sm_hash[MDSIZE];
-  compute_expected_sm_hash(expected_sm_hash);
-
-  /* Actual report checks */
-
   Report report;
   report.fromBytes(attestation);
 
-  if(verify_hashes(report, expected_enclave_hash, expected_sm_hash, _sanctum_dev_public_key)) {
-    return 1;
+  // qq: sm and enclave measurement can both be in measurement_out?
+  *measurement_out_size = MDSIZE * 2;
+  memcpy(measurement_out, report.getSmHash(), MDSIZE);
+  memcpy(measurement_out + MDSIZE, report.getEnclaveHash(), MDSIZE);
+
+  if(!report.checkSignaturesOnly(_sanctum_dev_public_key)) {
+    return false;
   }
 
   return verify_data(report, what_to_say_size, what_to_say);
 }
 
+#define AES_KEY_LEN 128
+#define AES_SCHEDULE_LEN 44
+
 // to share between seal and unseal
-bool keystone_getSealingKey(struct sealing_key& key_buffer) {
+bool keystone_getSealingKey(WORD key[]) {
+  struct sealing_key key_buffer; // {key, signature}
   char *key_identifier = "sealing-key";
-  return get_sealing_key(&key_buffer, sizeof(key_buffer),
+  int err = get_sealing_key(&key_buffer, sizeof(key_buffer),
                         (void *)key_identifier, strlen(key_identifier));
+  if (err) {
+    return false;
+  }
+  aes_key_setup(key_buffer.key, key, AES_KEY_LEN);
+  return true;
 }
 
 bool keystone_Seal(int in_size, byte* in, int* size_out, byte* out) {
-  struct sealing_key key_buffer; // {key, signature}
-  if (keystone_getSealingKey(key_buffer)) {
-    return ret;
+  WORD key[AES_SCHEDULE_LEN];
+  if (keystone_getSealingKey(key)) {
+    return false;
   }
-
-  // todo algorithm of choice for encryption using the key
-  return 0;
+  BYTE iv[AES_BLOCK_SIZE];
+  memset(iv, 0, AES_BLOCK_SIZE * sizeof(BYTE));
+  *size_out = in_size;
+  aes_encrypt_ctr(in, in_size, out, key, AES_KEY_LEN, iv);
+  return true;
 }
 
 bool keystone_Unseal(int in_size, byte* in, int* size_out, byte* out) {
-  struct sealing_key key_buffer;
-  if (keystone_getSealingKey(key_buffer)) {
-    return ret;
+  WORD key[AES_SCHEDULE_LEN];
+  if (keystone_getSealingKey(key)) {
+    return false;
   }
-
-  // todo algorithm of choice for decryption using the key
-  return 0;
+  BYTE iv[AES_BLOCK_SIZE];
+  memset(iv, 0, AES_BLOCK_SIZE * sizeof(BYTE));
+  *size_out = in_size;
+  aes_decrypt_ctr(in, in_size, out, key, AES_KEY_LEN, iv);
+  return true;
 }

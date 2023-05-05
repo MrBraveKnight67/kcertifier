@@ -1,3 +1,18 @@
+#include <getopt.h>
+#include <stdlib.h>
+
+#include <cerrno>
+#include <cstdio>
+#include <functional>
+#include <iostream>
+#include <stdexcept>
+#include <string>
+
+#include "common/sha3.h"
+// #include "host/keystone.h"
+#include "verifier/report.h"
+#include "verifier/test_dev_key.h"
+
 bool verify_hashes(
     Report& report, const byte* expected_enclave_hash,
     const byte* expected_sm_hash, const byte* dev_public_key);
