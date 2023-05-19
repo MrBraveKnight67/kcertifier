@@ -1,9 +1,11 @@
 #include "app/eapp_utils.h"
 #include "app/syscall.h"
+#include "app/string.h"
 #include "crypto/aes.h"
 #include "edge/edge_common.h"
 #include "verifier/report.h"
 #include "verifier/test_dev_key.h"
+#define assert(x) do {} while (false)
 
 typedef unsigned char byte;
 
